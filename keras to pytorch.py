@@ -184,3 +184,106 @@ inputs = [torch.randn(1, 1) for _ in range(22)]  # Adjust the number of inputs a
 outputs = model(inputs)
 
 print(outputs)
+
+
+
+
+
+
+
+
+
+
+
+
+################
+# simplified
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+class TradeWealthModel(nn.Module):
+    def __init__(self, m=1, d=1, N=20):
+        super(TradeWealthModel, self).__init__()
+        self.m = m
+        self.d = d
+        self.N = N
+
+        self.layers = nn.ModuleList()
+        for j in range(N):
+            for i in range(d):
+                layer = nn.Linear(2 * m, m)
+                nn.init.normal_(layer.weight, mean=0, std=1)
+                nn.init.normal_(layer.bias, mean=0, std=1)
+                self.layers.append(layer)
+
+    def forward(self, price, strategy, wealth, costs, incr_list):
+        for j in range(self.N):
+            helper1 = torch.cat((price, strategy), dim=1)
+            for i in range(self.d):
+                strategy_helper = torch.tanh(self.layers[i + j * self.d](helper1))
+
+            change = strategy_helper - strategy
+            strategy = strategy_helper
+            absolute_changes = torch.abs(change)
+            costs = -0.01 * torch.sum(absolute_changes * price, dim=1, keepdim=True)
+
+            price = price + incr_list[j]
+            mult = torch.sum(strategy_helper * incr_list[j], dim=1, keepdim=True)
+            wealth = wealth + mult + costs
+
+        helper = torch.abs(strategy)
+        costs = -0.01 * torch.sum(helper * price, dim=1, keepdim=True)
+        wealth = wealth + costs
+
+        return wealth
+
+# Custom loss function
+def custom_loss(y_pred):
+    return torch.mean(torch.exp(-y_pred))
+
+# Hyperparameters
+m = 1  # dimension of state space
+d = 1  # number of layers in strategy
+N = 20  # time discretization
+Ktrain = 10**4
+initialprice = 1.0
+initialwealth = 1.0
+
+# Create model
+model = TradeWealthModel(m, d, N)
+
+# Optimizer
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Data
+price = torch.tensor(initialprice * np.ones((Ktrain, m)), dtype=torch.float32)
+strategy = torch.tensor(0.0 * np.ones((Ktrain, m)), dtype=torch.float32)
+wealth = torch.tensor(initialwealth * np.ones((Ktrain, 1)), dtype=torch.float32)
+costs = torch.tensor(np.zeros((Ktrain, 1)), dtype=torch.float32)
+incr_list = [torch.tensor(np.random.normal(0.1 / N, 0.2 / np.sqrt(N), (Ktrain, m)), dtype=torch.float32) for i in range(N)]
+
+xtrain = [price, strategy, costs, wealth] + incr_list
+ytrain = torch.zeros((Ktrain, 1), dtype=torch.float32)
+
+# Training loop
+num_epochs = 100  # Example number of epochs
+
+for epoch in range(num_epochs):
+    model.train()
+    optimizer.zero_grad()
+
+    # Forward pass
+    output = model(price, strategy, wealth, costs, incr_list)
+
+    # Compute loss
+    loss = custom_loss(output)
+
+    # Backward pass and optimization
+    loss.backward()
+    optimizer.step()
+
+    print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
