@@ -287,3 +287,88 @@ for epoch in range(num_epochs):
     optimizer.step()
 
     print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+
+
+
+
+# newest
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MyOwnNeuralNetworkFunction(nn.Module):
+    def __init__(self):
+        super(MyOwnNeuralNetworkFunction, self).__init__()
+        # Define your neural network layers here, e.g.,
+        self.dense1 = nn.Linear(1, 10)
+        self.dense2 = nn.Linear(10, 1)
+    
+    def forward(self, x):
+        x = F.relu(self.dense1(x))
+        x = self.dense2(x)
+        return x
+
+class DeepHedgingModel(nn.Module):
+    def __init__(self, N, d, m, risk_free, dt, initial_wealth=0.0, epsilon=0.0,
+                 final_period_cost=False, strategy_type=None, use_batch_norm=None,
+                 kernel_initializer="he_uniform", activation_dense="relu", activation_output="linear", 
+                 delta_constraint=None, share_strategy_across_time=False, 
+                 cost_structure="proportional"):
+        super(DeepHedgingModel, self).__init__()
+        
+        self.N = N
+        self.strategy_layers = nn.ModuleList([MyOwnNeuralNetworkFunction() for _ in range(N)])
+        
+    def forward(self, inputs):
+        prc = inputs[0]
+        information_set = inputs[1]
+        
+        strategy = None
+        wealth = torch.tensor([0.0])
+        
+        for j in range(self.N):
+            strategy_layer = self.strategy_layers[j]
+            strategy_helper = strategy_layer(information_set)
+            
+            if j == 0:
+                delta_strategy = strategy_helper
+            else:
+                delta_strategy = strategy_helper - strategy
+                
+            mult = delta_strategy * prc
+            
+            if j == 0:
+                wealth = -mult
+            else:
+                wealth = wealth - mult
+            
+            strategy = strategy_helper
+            
+            prc = inputs[2 * (j + 1)]
+            information_set = inputs[2 * (j + 1) + 1]
+        
+        mult = strategy * prc
+        wealth = wealth + mult
+        
+        payoff = inputs[-1]
+        wealth = wealth + payoff
+        
+        return wealth
+
+# Define the model parameters
+N = 10
+d = 1
+m = 1
+risk_free = 0.01
+dt = 0.01
+
+# Create the model
+model = DeepHedgingModel(N, d, m, risk_free, dt)
+
+# Example inputs
+inputs = [torch.tensor([[0.5]]), torch.tensor([[0.1]])] * N + [torch.tensor([[1.0]])]
+
+# Forward pass
+output = model(inputs)
+print(output)
